@@ -8,12 +8,15 @@ import os
 from dotenv import load_dotenv
 import re
 import datetime
+from upstash_redis import Redis
 
 load_dotenv()
 
 client = MongoClient(os.getenv("MONGODB_URI"))
 db = client.get_database()
 docs = db["docs"]
+
+redis_queue = Redis.from_env()
 
 SEED_URLS = [
     "https://en.wikipedia.org/wiki/Computer_science",
@@ -129,9 +132,10 @@ def crawl():
                 "created_at": datetime.datetime.now()
             }
             
-            docs.insert_one(new_doc)
+            inserted_doc = docs.insert_one(new_doc)
 
             print("Doc added!")
+            redis_queue.lpush("wikidocs_queue", str(inserted_doc.inserted_id))
 
             visited.add(url)
             pages_crawled += 1
