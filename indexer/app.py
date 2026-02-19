@@ -24,13 +24,13 @@ def preprocess(text):
     text = text.lower()
     words = re.findall(r'\b[a-z]+\b', text)
 
-    processed = []
+    tokens = []
 
     for word in words:
         if word not in stop_words:
-            processed.append(word)
+            tokens.append(word)
 
-    return processed
+    return tokens
 
 def index_doc(doc):
     doc_id = str(doc["_id"])
@@ -56,13 +56,12 @@ def index_doc(doc):
 
 if __name__ == "__main__":
     while True:
-        doc_id = str(redis.rpop("wikidocs_queue"))
+        doc_id = redis.rpop("wikidocs_queue")
         if doc_id is None:
             continue
         
         doc = docs.find_one({
-            "_id": ObjectId(doc_id)
+            "_id": ObjectId(str(doc_id))
         })
         if doc:
             index_doc(doc)
-    redis.flushdb()
