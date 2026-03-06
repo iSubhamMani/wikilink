@@ -38,66 +38,75 @@ app = Flask(__name__)
 
 @app.route("/search", methods=["GET"])
 def search():
-    q = request.args.get("q", "")
-    print(q)
-    if not q:
-        return jsonify({
-            "error": "Query parameter 'q' is required"
-        })
-    
-    query_tokens = preprocess(q)
-    print(query_tokens)
+    try:
+        q = request.args.get("q", "")
+        print(q)
+        if not q:
+            return jsonify({
+                "error": "Query parameter 'q' is required"
+            })
+        
+        query_tokens = preprocess(q)
 
-    if not query_tokens:
+        if not query_tokens:
+            return jsonify({
+                "results": []
+            })
+        
+        total_docs = int(redis.get("stats:total_docs") or 0)
+
+        doc_scores = {}
+
+        for token in query_tokens:
+            indexed_docs = redis.hgetall(f"term:{token}")
+
+            if not indexed_docs:
+                continue
+
+            df = int(redis.get(f"df:{token}") or 0)
+
+            # calculate idf
+
+            idf = math.log(total_docs / df)
+
+            # calculate scores for each doc containing the term
+
+            for doc_id, tf in indexed_docs.items():
+                tf = float(tf)
+                doc_len = int(redis.hget(f"doc_clen:{doc_id}", "clen") or 0)
+                normalized_tf = tf / doc_len if doc_len > 0 else 0
+
+                doc_scores[doc_id] = normalized_tf * idf
+
+            ranked_docs = sorted(doc_scores.items(), key=lambda x: x[1], reverse=True)
+            results = []
+
+            for doc_id, score in ranked_docs[:10]:
+                doc = docs.find_one({
+                    "_id": ObjectId(str(doc_id))
+                })
+
+                if doc:
+                    results.append({
+                        "title": doc.get("title", ""),
+                        "url": doc.get("url", ""),
+                        "summary": doc.get("clean_text", "")[:200] + "...",
+                        "score": score
+                    })
+
+            return jsonify({
+                "results": results
+            })
+    
         return jsonify({
             "results": []
         })
-    
-    total_docs = int(redis.get("stats:total_docs") or 0)
 
-    doc_scores = {}
-
-    for token in query_tokens:
-        indexed_docs = redis.hgetall(f"term:{token}")
-
-        if not indexed_docs:
-            continue
-
-        df = int(redis.get(f"df:{token}") or 0)
-
-        # calculate idf
-
-        idf = math.log(total_docs / df)
-
-        # calculate scores for each doc containing the term
-
-        for doc_id, tf in indexed_docs.items():
-            tf = float(tf)
-            doc_len = int(redis.hget(f"doc_clen:{doc_id}", "clen") or 0)
-            normalized_tf = tf / doc_len if doc_len > 0 else 0
-
-            doc_scores[doc_id] = normalized_tf * idf
-
-        ranked_docs = sorted(doc_scores.items(), key=lambda x: x[1], reverse=True)
-        results = []
-
-        for doc_id, score in ranked_docs[:10]:
-            doc = docs.find_one({
-                "_id": ObjectId(str(doc_id))
-            })
-
-            if doc:
-                results.append({
-                    "title": doc.get("title", ""),
-                    "url": doc.get("url", ""),
-                    "summary": doc.get("clean_text", "")[:200] + "...",
-                    "score": score
-                })
-        print(results)
-
+    except Exception as e:
+        print(f"Error in search: {e}")
         return jsonify({
-            "results": results
-        })
-    
+            "error": "An error occurred while processing the search"
+        }), 500
+
 if __name__ == "__main__":
     app.run(debug=True)
